@@ -165,3 +165,7 @@ Flutter can be installed by snap, but it will add some [enviroment vars(`CPLUS_I
 ![fvp_win7](https://user-images.githubusercontent.com/785206/266754957-883d05c9-a057-4c1c-b824-0dc385a13f78.jpg)
 ![fvp_linux](https://user-images.githubusercontent.com/785206/248859533-ce2ad50b-2ead-43bb-bf25-6e2575c5ebe1.jpeg)
 ![fvp_macos](https://user-images.githubusercontent.com/785206/248859538-71de39a4-c5f0-4c8f-9920-d7dfc6cd0d9a.jpg)
+
+The refreshed `mdk.xcframework` and its `mdk-version.json` record are build
+outputs: they are git-ignored, and CI rejects a committed Apple SDK the same way
+it rejects any other native runtime binary.

@@ -42,6 +42,13 @@ jobs:
             echo 'Native runtime binary committed to source repository' >&2
             exit 1
           fi
+          # The Apple SDK is resolved per build (see the README note on MDK's
+          # 44-day key-free window); a committed xcframework would be the pin
+          # that expires, and CI must not accept one.
+          if find third_party/fvp -name '*.xcframework' -print -quit | grep -q .; then
+            echo 'Apple MDK SDK committed to source repository' >&2
+            exit 1
+          fi
       - name: Analyze and test core
         working-directory: ${{ env.CORE }}
         run: flutter pub get && flutter analyze --fatal-infos && flutter test

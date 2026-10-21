@@ -15,3 +15,9 @@ build/
 **/linux/flutter/ephemeral/
 third_party/fvp/**/mdk-sdk/
 third_party/fvp/**/mdk-sdk-*.7z
+# The Apple SDK is resolved per build by
+# third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py, because libmdk stops
+# playing video 44 days after its own build stamp. CI rejects committed native
+# binaries, and a committed copy would be the pin this replaced.
+third_party/fvp/darwin/fvp/mdk.xcframework/
+third_party/fvp/darwin/fvp/mdk-version.json
