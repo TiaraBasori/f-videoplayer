@@ -52,8 +52,14 @@ let package = Package(
         ),
         .binaryTarget(
             name: "mdk",
-            url: "https://github.com/iebb/f-videoplayer/releases/download/mdk-nightly-2026-08-14/mdk.xcframework.zip",
-            checksum: "615b9e8ddd6d31a35c109b8dcb2493e896a3b532aed0b6b498d1c62686fbe3b7"
+            // Build-time refresh target: `tool/mdk_apple_freshness.py refresh`
+            // installs the verified SDK here. libmdk's key-free path expires 44
+            // days after its own build stamp (wang-bin/appkey app.cpp
+            // `checkLicense`), which no committed URL can stay ahead of, so the
+            // build resolves and verifies a fresh SDK instead of pinning one
+            // archive forever. Missing here means the build was not prepared —
+            // fail loudly rather than silently resolving an expired SDK.
+            path: "mdk.xcframework"
         ),
     ],
     cxxLanguageStandard: .cxx20

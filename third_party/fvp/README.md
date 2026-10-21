@@ -99,6 +99,39 @@ archive hash in `FVP_DEPS_SHA256`. Update the package name, version, checksum
 table, Apple package checksum, notices, and native build matrix together when
 upgrading.
 
+Apple targets cannot be pinned that way. libmdk's key-free path stops working
+44 days after the library was built: `App::checkLicense` in
+[wang-bin/appkey](https://github.com/wang-bin/appkey) (`app.cpp`, the
+`3600*24*44` freshness test) compares the build stamp compiled into the binary
+with the current clock, and once it is older the player draws an
+"MDK SDK is outdated" QR frame over the video. The stamp is the binary's own
+build time — not the release tag, the commit, or the archive mtime — so no
+committed URL can stay valid.
+
+The Swift package therefore declares
+`third_party/fvp/darwin/fvp/mdk.xcframework` as a local binary target, and the
+build fills it with `darwin/fvp/tool/mdk_apple_freshness.py`:
+
+```bash
+python3 darwin/fvp/tool/mdk_apple_freshness.py \
+  --destination darwin/fvp/mdk.xcframework refresh      # resolve + verify + install
+python3 darwin/fvp/tool/mdk_apple_freshness.py \
+  --destination darwin/fvp/mdk.xcframework check        # verify only
+```
+
+`refresh` resolves the newest [wang-bin/mdk-sdk](https://github.com/wang-bin/mdk-sdk)
+release (or the SourceForge nightly, or an explicit `MDK_APPLE_SDK_URL`),
+checks the archive against the digest GitHub publishes for it, reads the build
+stamp from the ARM64 iOS slice, and refuses an SDK that is outside the 44-day
+window minus `MDK_FRESHNESS_MARGIN_DAYS` (default 7). It also refuses an SDK
+whose `MDK_MAJOR`/`MDK_MINOR` is below the API this fork compiles against, or
+whose iOS and macOS slices disagree. The installed framework is re-verified
+and its stamp re-read from the copy on disk before `mdk-version.json` records
+the provenance. SDKs only ship in stable `vX.Y.Z` releases and the SourceForge
+nightly, so an upstream release older than the margin is a hard stop: point
+`MDK_APPLE_SDK_URL` at a newer `mdk.xcframework`, or supply an `MDK_KEY` and
+skip the freshness requirement deliberately.
+
 
 # Design
 - Playback control api in dart via ffi

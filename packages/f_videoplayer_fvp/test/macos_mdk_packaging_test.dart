@@ -56,7 +56,7 @@ void main() {
     );
   });
 
-  test('native packaging pins the 2026-08-14 MDK nightly digests', () {
+  test('Apple packaging refreshes MDK instead of pinning an expiring archive', () {
     final manifest = File(
       '../../third_party/fvp/darwin/fvp/Package.swift',
     ).readAsStringSync();
@@ -64,16 +64,15 @@ void main() {
       '../../third_party/fvp/cmake/deps.cmake',
     ).readAsStringSync();
 
-    expect(
-      manifest,
-      contains('releases/download/mdk-nightly-2026-08-14/mdk.xcframework.zip'),
-    );
-    expect(
-      manifest,
-      contains(
-        '615b9e8ddd6d31a35c109b8dcb2493e896a3b532aed0b6b498d1c62686fbe3b7',
-      ),
-    );
+    // libmdk's key-free path expires 44 days after its own build stamp, so an
+    // Apple binary target that names one archive is a latent
+    // "MDK SDK is outdated" QR frame. The build installs a verified SDK at the
+    // local path instead.
+    expect(manifest, contains('path: "mdk.xcframework"'));
+    expect(manifest, isNot(contains('mdk-nightly-2026-08-14')));
+    expect(manifest, isNot(contains('mdk.xcframework.zip')));
+
+    // Non-Apple archives keep their immutable nightly mirror and digests.
     expect(cmake, contains('releases/download/mdk-nightly-2026-08-14'));
     for (final digest in [
       'e61c38782b13198732749caaca436b7c0e13d34cf8d9050f5e5505838ab5529b',
@@ -85,6 +84,34 @@ void main() {
     ]) {
       expect(cmake, contains(digest));
     }
+  });
+
+  test('the MDK freshness gate reads the binary stamp, not the release', () {
+    final tool = File(
+      '../../third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py',
+    ).readAsStringSync();
+
+    // 44 days is MDK's own window (wang-bin/appkey checkLicense).
+    expect(tool, contains('FREE_WINDOW_DAYS = 44'));
+    expect(tool, contains('DEFAULT_MARGIN_DAYS = 7'));
+    // The stamp sits between the license diagnostics and the strptime format
+    // MDK parses it with, so the reader must key on that format string.
+    expect(tool, contains(r'%b %e %Y %H:%M:%S'));
+    // An SDK may not silently move past the API the bridge compiles against.
+    expect(tool, contains('REQUIRED_MINOR = 39'));
+    expect(tool, contains('MDK_MAJOR'));
+    expect(tool, contains('MDK_MINOR'));
+    // GitHub publishes per-asset sha256 digests; an unverifiable archive is
+    // refused rather than trusted.
+    expect(tool, contains('sha256:'));
+    // The macOS slice keeps its headers behind a Headers symlink; extracting
+    // with Python's zipfile would write that entry as a regular file.
+    expect(tool, contains('unzip'));
+    expect(
+      tool,
+      contains('def check('),
+      reason: 'A prepared checkout must be re-verifiable without a download.',
+    );
   });
 
   test('Apple SPM embeds the FFI bridge as a dynamic product', () {
