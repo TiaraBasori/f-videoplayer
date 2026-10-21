@@ -1,3 +1,7 @@
+## 0.5.9
+
+- Coordinate the package with the Apple MDK build-time freshness fix.
+
 ## 0.5.8
 
 - Coordinate the package with the player keyboard shortcut fixes.

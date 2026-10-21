@@ -1,6 +1,6 @@
 name: f_videoplayer
 description: Responsive Flutter video player with accessible controls and independent desktop windows.
-version: 0.5.8
+version: 0.5.9
 publish_to: none
 homepage: https://github.com/iebb/f-videoplayer
 repository: https://github.com/iebb/f-videoplayer

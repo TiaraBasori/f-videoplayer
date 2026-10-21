@@ -1,3 +1,7 @@
+## 0.5.9
+
+- Resolve the Apple MDK SDK at build time instead of pinning one archive. The pinned 2026-08-14 binary closed its 44-day key-free window on 2026-09-27, which is when iOS started drawing the outdated-SDK QR frame over playback. The Apple binary target is now a local path filled by `darwin/fvp/tool/mdk_apple_freshness.py`, so a build refuses an SDK that is already too old instead of shipping it.
+
 ## 0.5.8
 
 - Coordinate the package with the player keyboard shortcut fixes.

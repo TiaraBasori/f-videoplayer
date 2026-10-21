@@ -1,7 +1,7 @@
 name: f_videoplayer_pip
 description: Native Picture-in-Picture sessions for F Video Player.
 publish_to: none
-version: 0.5.8
+version: 0.5.9
 homepage: https://github.com/iebb/f-videoplayer
 repository: https://github.com/iebb/f-videoplayer
 issue_tracker: https://github.com/iebb/f-videoplayer/issues

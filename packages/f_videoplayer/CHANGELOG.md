@@ -1,3 +1,7 @@
+## 0.5.9
+
+- Coordinate the package with the Apple MDK build-time freshness fix.
+
 ## 0.5.8
 
 - Preserve Command, Control, Option, and Shift shortcuts in player buttons and sliders.

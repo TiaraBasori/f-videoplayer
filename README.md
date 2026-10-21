@@ -73,19 +73,19 @@ dependencies:
   f_videoplayer:
     git:
       url: https://github.com/iebb/f-videoplayer.git
-      ref: v0.5.8
+      ref: v0.5.9
       path: packages/f_videoplayer
   f_videoplayer_pip:
     git:
       url: https://github.com/iebb/f-videoplayer.git
-      ref: v0.5.8
+      ref: v0.5.9
       path: packages/f_videoplayer_pip
 
 # Add only when the final application uses FVP.
   f_videoplayer_fvp:
     git:
       url: https://github.com/iebb/f-videoplayer.git
-      ref: v0.5.8
+      ref: v0.5.9
       path: packages/f_videoplayer_fvp
   fvp: ^0.37.3
 
@@ -93,7 +93,7 @@ dependency_overrides:
   fvp:
     git:
       url: https://github.com/iebb/f-videoplayer.git
-      ref: v0.5.8
+      ref: v0.5.9
       path: third_party/fvp
 ```
 
