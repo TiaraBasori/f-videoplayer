@@ -4,7 +4,10 @@ import 'media_info_dummy.dart';
 
 /// A dummy class for web
 class MdkVideoPlayerPlatform {
-  static void registerVideoPlayerPlatformsWith({dynamic options}) {}
+  static void registerVideoPlayerPlatformsWith({
+    dynamic options,
+    bool deferSetupUntilMain = false,
+  }) {}
 
   // for FVPController
   bool isLive(int playerId) {

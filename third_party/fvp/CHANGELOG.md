@@ -1,5 +1,7 @@
 # 0.37.3+fvideo.10
 
+- Match the web registration stub to the native deferred-setup signature so
+  applications importing FVP still compile for the web.
 - Prepare the SDK before example Apple CI builds, require expected digests in
   every download mode, and cover the real resolver/install/check paths with
   offline tests on Linux and macOS. Verify simulator and macOS stamps, matching
