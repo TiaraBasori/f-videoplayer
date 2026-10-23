@@ -11,8 +11,8 @@ not derived from the release tag, the repository commit, or the archive mtime.
 A source-pinned fork cannot name a fresh archive in a manifest that is written
 once, so this script runs at build time instead:
 
-1. resolve an Apple `mdk.xcframework` source (upstream GitHub release, the
-   SourceForge nightly, or an explicit URL),
+1. resolve an Apple `mdk.xcframework` source (upstream GitHub release or an
+   explicit URL with a required SHA-256),
 2. read the build stamp out of the ARM64 iOS binary that will be embedded,
 3. refuse an SDK that is not inside the window with the remaining margin,
 4. verify the SDK's major/minor version covers the API the fork compiles
@@ -31,6 +31,7 @@ import datetime
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -54,7 +56,7 @@ REQUIRED_MINOR = 39
 REQUIRED_MAJOR = 0
 
 UPSTREAM_REPOSITORY = "wang-bin/mdk-sdk"
-UPDATER_VERSION = 1
+UPDATER_VERSION = 2
 
 _STAMP = re.compile(
     rb"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([ 0-9][0-9]) (20[0-9]{2})"
@@ -118,10 +120,54 @@ def required_members(xcframework: Path) -> dict[str, Path]:
     return {
         "ios": xcframework / "ios-arm64/mdk.framework/mdk",
         "ios_header": xcframework / "ios-arm64/mdk.framework/Headers/c/global.h",
+        "ios_simulator": xcframework
+        / "ios-arm64_x86_64-simulator/mdk.framework/mdk",
+        "ios_simulator_header": xcframework
+        / "ios-arm64_x86_64-simulator/mdk.framework/Headers/c/global.h",
         "macos": xcframework / "macos-arm64_x86_64/mdk.framework/mdk",
         "macos_header": xcframework
         / "macos-arm64_x86_64/mdk.framework/Headers/c/global.h",
         "plist": xcframework / "Info.plist",
+    }
+
+
+def _verify_framework(
+    target: Path, now: datetime.datetime, margin_days: int
+) -> tuple[datetime.datetime, tuple[int, int], dict[str, str]]:
+    members = required_members(target)
+    missing = [name for name, path in members.items() if not path.is_file()]
+    if missing:
+        raise RefreshError(f"the framework is missing {', '.join(missing)}")
+    try:
+        with members["plist"].open("rb") as stream:
+            plist = plistlib.load(stream)
+        identifiers = {
+            item["LibraryIdentifier"] for item in plist["AvailableLibraries"]
+        }
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise RefreshError("the framework has an invalid Info.plist") from error
+    if not {
+        "ios-arm64", "ios-arm64_x86_64-simulator", "macos-arm64_x86_64"
+    }.issubset(identifiers):
+        raise RefreshError("Info.plist must declare iOS, iOS simulator and macOS")
+
+    versions = []
+    stamps = []
+    for platform in ("ios", "ios_simulator", "macos"):
+        stamp = read_build_stamp(members[platform])
+        _check_freshness(stamp, now, margin_days)
+        stamps.append(stamp)
+        version = read_sdk_version(members[f"{platform}_header"])
+        if version < (REQUIRED_MAJOR, REQUIRED_MINOR):
+            raise RefreshError(
+                f"the {platform} SDK is MDK {version[0]}.{version[1]}, below "
+                f"the fork's {REQUIRED_MAJOR}.{REQUIRED_MINOR} API"
+            )
+        versions.append(version)
+    if len(set(versions)) != 1:
+        raise RefreshError("the iOS, simulator and macOS SDK versions disagree")
+    return min(stamps), versions[0], {
+        name: _sha256(path) for name, path in members.items()
     }
 
 
@@ -133,13 +179,11 @@ def _extract(archive: Path, destination: Path) -> None:
     the link target, which leaves a framework SwiftPM cannot compile against.
     """
     if zipfile.is_zipfile(archive):
-        if shutil.which("unzip"):
-            subprocess.run(
-                ["unzip", "-q", str(archive), "-d", str(destination)], check=True
-            )
-            return
-        with zipfile.ZipFile(archive) as bundle:
-            bundle.extractall(destination)
+        if not shutil.which("unzip"):
+            raise RefreshError("unzip is required to preserve framework symlinks")
+        subprocess.run(
+            ["unzip", "-q", str(archive), "-d", str(destination)], check=True
+        )
         return
     if tarfile.is_tarfile(archive):
         if shutil.which("tar"):
@@ -173,12 +217,12 @@ def _github_release_asset(tag: str, asset: str) -> tuple[str, str]:
         if item.get("name") != asset:
             continue
         digest = str(item.get("digest") or "")
-        if not digest.startswith("sha256:"):
+        if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
             raise RefreshError(
                 f"{asset} in {tag} publishes no sha256 digest; refusing an "
                 "unverifiable archive"
             )
-        return str(item["browser_download_url"]), digest.removeprefix("sha256:")
+        return str(item["browser_download_url"]), digest[7:].lower()
     raise RefreshError(f"{tag} has no asset named {asset}")
 
 
@@ -199,26 +243,22 @@ def _newest_release_tag() -> str:
     except (urllib.error.URLError, TimeoutError) as error:
         raise RefreshError(f"cannot list {UPSTREAM_REPOSITORY} releases: {error}")
     for release in releases:
-        if not release.get("draft") and release.get("tag_name"):
+        if (not release.get("draft") and not release.get("prerelease")
+                and release.get("tag_name")):
             return str(release["tag_name"])
     raise RefreshError(f"{UPSTREAM_REPOSITORY} publishes no release")
 
 
-def _download(url: str, destination: Path, *, sourceforge: bool) -> None:
+def _download(url: str, destination: Path) -> None:
     request = urllib.request.Request(
         url, headers={"User-Agent": "mithka-mdk-freshness"}
     )
     try:
         with urllib.request.urlopen(request, timeout=600) as response:
-            if sourceforge and "sourceforge.net" in response.geturl():
-                # The project page links to a mirror chosen per request; the
-                # extracted build stamp decides whether the bytes are usable,
-                # so following it is safe here.
-                pass
             with destination.open("wb") as target:
                 shutil.copyfileobj(response, target, length=1 << 20)
     except (urllib.error.URLError, TimeoutError) as error:
-        raise RefreshError(f"cannot download {url}: {error}")
+        raise RefreshError(f"cannot download the SDK archive: {error}") from error
 
 
 def _sha256(path: Path) -> str:
@@ -233,12 +273,18 @@ def _resolve(
     source: str, upstream_tag: str | None, url: str | None, work: Path
 ) -> tuple[Path, dict[str, object]]:
     """Download the archive a source names; return it with provenance facts."""
+    expected = os.environ.get("MDK_APPLE_SDK_SHA256", "").strip().lower()
+    if source != "url" and (url or expected):
+        raise RefreshError(
+            "MDK_APPLE_SDK_URL/SHA256 require --source url; refusing to ignore "
+            "an explicit archive or digest"
+        )
     if source == "upstream":
         tag = upstream_tag or _newest_release_tag()
         link, digest = _github_release_asset(tag, "mdk-sdk-apple.zip")
         archive = work / "mdk-sdk-apple.zip"
         _log(f"downloading upstream {tag}")
-        _download(link, archive, sourceforge=False)
+        _download(link, archive)
         actual = _sha256(archive)
         if actual != digest:
             raise RefreshError(
@@ -248,26 +294,30 @@ def _resolve(
         return archive, {"kind": "upstream-release", "tag": tag, "url": link,
                          "sha256": actual}
     if source == "sourceforge":
-        link = (
-            "https://sourceforge.net/projects/mdk-sdk/files/nightly/"
-            "mdk-sdk-apple.zip/download"
+        raise RefreshError(
+            "SourceForge nightly resolution has no verified SHA-256. Use "
+            "--source url with MDK_APPLE_SDK_URL and a trusted "
+            "MDK_APPLE_SDK_SHA256 instead"
         )
-        archive = work / "mdk-sdk-apple.zip"
-        _log("downloading the SourceForge nightly")
-        _download(link, archive, sourceforge=True)
-        return archive, {"kind": "sourceforge-nightly", "url": link,
-                         "sha256": _sha256(archive)}
     if source == "url":
-        if not url or not url.startswith("https://"):
+        parsed = urllib.parse.urlsplit(url or "")
+        if parsed.scheme != "https" or not parsed.hostname:
             raise RefreshError("MDK_APPLE_SDK_URL must be an https:// archive")
-        expected = os.environ.get("MDK_APPLE_SDK_SHA256", "").strip().lower()
-        archive = work / "mdk-sdk-apple.zip"
-        _log(f"downloading {url}")
-        _download(url, archive, sourceforge=False)
-        actual = _sha256(archive)
-        if expected and actual != expected:
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise RefreshError(
-                f"{url} digest mismatch: MDK_APPLE_SDK_SHA256 is {expected}, "
+                "MDK_APPLE_SDK_URL must not contain credentials, query or fragment"
+            )
+        if upstream_tag:
+            raise RefreshError("--upstream-tag cannot be combined with --source url")
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            raise RefreshError("MDK_APPLE_SDK_SHA256 must contain 64 hex characters")
+        archive = work / "mdk-sdk-apple.zip"
+        _log("downloading the explicit SDK archive")
+        _download(url, archive)
+        actual = _sha256(archive)
+        if actual != expected:
+            raise RefreshError(
+                f"SDK digest mismatch: MDK_APPLE_SDK_SHA256 is {expected}, "
                 f"downloaded {actual}"
             )
         return archive, {"kind": "explicit-url", "url": url, "sha256": actual}
@@ -277,6 +327,8 @@ def _resolve(
 def _check_freshness(
     stamp: datetime.datetime, now: datetime.datetime, margin_days: int
 ) -> None:
+    if not 0 <= margin_days < FREE_WINDOW_DAYS:
+        raise RefreshError("the safety margin must be between 0 and 43 days")
     age = now - stamp
     if age < datetime.timedelta(0):
         raise RefreshError(
@@ -307,29 +359,9 @@ def refresh(args: argparse.Namespace) -> None:
         extracted.mkdir()
         _extract(archive, extracted)
         source_root = find_xcframework(extracted)
-        members = required_members(source_root)
-        missing = [name for name, path in members.items() if not path.is_file()]
-        if missing:
-            raise RefreshError(
-                f"the archive is missing {', '.join(missing)}; the fork embeds "
-                "the iOS and macOS slices of mdk.xcframework"
-            )
-
-        stamp = read_build_stamp(members["ios"])
-        _check_freshness(stamp, now, args.margin_days)
-        major, minor = read_sdk_version(members["ios_header"])
-        if (major, minor) < (REQUIRED_MAJOR, REQUIRED_MINOR):
-            raise RefreshError(
-                f"the SDK is MDK {major}.{minor}, but the fork compiles against "
-                f"API {REQUIRED_MAJOR}.{REQUIRED_MINOR}; its headers may not "
-                "declare the calls the bridge uses"
-            )
-        macos_major, macos_minor = read_sdk_version(members["macos_header"])
-        if (macos_major, macos_minor) != (major, minor):
-            raise RefreshError(
-                f"the iOS slice is MDK {major}.{minor} but the macOS slice is "
-                f"{macos_major}.{macos_minor}; one app would link two ABIs"
-            )
+        stamp, (major, minor), hashes = _verify_framework(
+            source_root, now, args.margin_days
+        )
 
         target = Path(args.destination).resolve()
         if target.exists():
@@ -337,16 +369,12 @@ def refresh(args: argparse.Namespace) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_root, target, symlinks=True)
 
-        installed = required_members(target)
-        installed_stamp = read_build_stamp(installed["ios"])
-        if installed_stamp != stamp:
-            raise RefreshError(
-                "the installed framework does not carry the stamp that was "
-                f"verified ({installed_stamp.isoformat()} != {stamp.isoformat()})"
-            )
-        for name, path in installed.items():
-            if not path.is_file():
-                raise RefreshError(f"the installed framework lost {name}")
+        installed_stamp, installed_version, installed_hashes = _verify_framework(
+            target, now, args.margin_days
+        )
+        if (installed_stamp != stamp or installed_version != (major, minor)
+                or installed_hashes != hashes):
+            raise RefreshError("the installed framework differs from the verified SDK")
 
         record = {
             "updater": UPDATER_VERSION,
@@ -356,6 +384,7 @@ def refresh(args: argparse.Namespace) -> None:
             "verified_at": now.isoformat(),
             "free_window_days": FREE_WINDOW_DAYS,
             "margin_days": args.margin_days,
+            "files_sha256": installed_hashes,
         }
         (target.parent / "mdk-version.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n"
@@ -372,20 +401,21 @@ def refresh(args: argparse.Namespace) -> None:
 def check(args: argparse.Namespace) -> None:
     """Re-verify an installed framework without downloading anything."""
     target = Path(args.destination).resolve()
-    members = required_members(target)
-    missing = [name for name, path in members.items() if not path.is_file()]
-    if missing:
-        raise RefreshError(f"the installed framework is missing {', '.join(missing)}")
     now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     if args.now:
         now = datetime.datetime.fromisoformat(args.now)
-    stamp = read_build_stamp(members["ios"])
-    _check_freshness(stamp, now, args.margin_days)
-    major, minor = read_sdk_version(members["ios_header"])
-    if (major, minor) < (REQUIRED_MAJOR, REQUIRED_MINOR):
+    stamp, (major, minor), hashes = _verify_framework(target, now, args.margin_days)
+    try:
+        record = json.loads((target.parent / "mdk-version.json").read_text())
+    except (OSError, ValueError) as error:
+        raise RefreshError("missing or unreadable SDK provenance; refresh again") from error
+    if (not isinstance(record, dict)
+            or record.get("updater") != UPDATER_VERSION
+            or record.get("files_sha256") != hashes
+            or record.get("build_stamp") != stamp.isoformat()
+            or record.get("sdk_version") != f"{major}.{minor}"):
         raise RefreshError(
-            f"the installed SDK is MDK {major}.{minor}, below the fork's "
-            f"{REQUIRED_MAJOR}.{REQUIRED_MINOR} API"
+            "the installed SDK no longer matches its provenance; refresh again"
         )
     _log(f"installed MDK {major}.{minor} built {stamp.date()} is still fresh")
 
@@ -403,7 +433,7 @@ def main(argv: list[str]) -> int:
     refresh_parser.add_argument(
         "--source",
         choices=("upstream", "sourceforge", "url"),
-        default="upstream",
+        default=os.environ.get("MDK_APPLE_SDK_SOURCE") or None,
         help="where to take the SDK from",
     )
     refresh_parser.add_argument(
@@ -433,6 +463,8 @@ def main(argv: list[str]) -> int:
     check_parser.set_defaults(handler=check)
 
     args = parser.parse_args(argv)
+    if args.command == "refresh" and args.source is None:
+        args.source = "url" if args.url else "upstream"
     try:
         args.handler(args)
     except RefreshError as error:

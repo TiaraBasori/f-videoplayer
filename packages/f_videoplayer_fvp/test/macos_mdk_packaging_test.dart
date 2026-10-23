@@ -107,8 +107,7 @@ void main() {
     // The macOS slice keeps its headers behind a Headers symlink; extracting
     // with Python's zipfile would write that entry as a regular file.
     expect(tool, contains('"unzip"'));
-    // MDK_ALLOW_STALE is Mithka's deliberate escape hatch, not the tool's: a
-    // stale SDK is a hard failure at this layer.
+    // A stale SDK is a hard failure at this layer.
     expect(tool, isNot(contains('MDK_ALLOW_STALE')));
     expect(
       tool,

@@ -100,6 +100,15 @@ dependency_overrides:
 Applications using only the official Android, iOS, macOS, and web backends
 should omit both FVP entries so its native runtime is not added to artifacts.
 
+Apple applications that use this FVP fork must prepare the local MDK framework
+before Flutter/SwiftPM resolves native packages. Run the resolved FVP package's
+`darwin/fvp/tool/mdk_apple_freshness.py` with `--destination
+darwin/fvp/mdk.xcframework refresh`, followed by `check`. See the
+[Apple SDK preparation instructions](third_party/fvp/README.md#upgrade-dependencies-manually)
+for source selection and required digests. The example CI performs both steps.
+This prevents new builds from using an expired SDK; it does not extend the
+key-free lifetime of the SDK inside an already installed app.
+
 For development from `master` or a specific commit, add an application-level
 `dependency_overrides` entry for `f_videoplayer` using the same Git ref. Pub
 otherwise treats a tag, branch, and commit as distinct sources even when they

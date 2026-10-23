@@ -26,9 +26,12 @@ The build scripts pin the official 2026-08-14 MDK nightly (0.38.0, git
 5411f17) mirrored at the repository's `mdk-nightly-2026-08-14` release, and
 verify every asset with SHA-256 before extraction. Apple SDKs are resolved at
 build time instead, because libmdk's key-free path expires 44 days after the
-library's own build stamp; `darwin/fvp/tool/mdk_apple_freshness.py` verifies
-the archive against the digest its publisher reports and refuses an SDK outside
-that window. Integrity verification does not replace license review.
+library's own build stamp; `darwin/fvp/tool/mdk_apple_freshness.py` requires a
+GitHub-published digest or an explicitly supplied trusted SHA-256 before
+extraction and refuses an SDK outside that window. Unverified automatic nightly
+resolution is disabled. Build-time refresh does not extend the lifetime of the
+SDK already embedded in an installed app. Integrity verification does not
+replace license review.
 
 Native archives may contain FFmpeg, libass, TLS/crypto libraries, or other
 components. Before distributing a binary, the application owner must preserve

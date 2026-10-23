@@ -119,18 +119,35 @@ python3 darwin/fvp/tool/mdk_apple_freshness.py \
   --destination darwin/fvp/mdk.xcframework check        # verify only
 ```
 
-`refresh` resolves the newest [wang-bin/mdk-sdk](https://github.com/wang-bin/mdk-sdk)
-release (or the SourceForge nightly, or an explicit `MDK_APPLE_SDK_URL`),
-checks the archive against the digest GitHub publishes for it, reads the build
-stamp from the ARM64 iOS slice, and refuses an SDK that is outside the 44-day
-window minus `MDK_FRESHNESS_MARGIN_DAYS` (default 7). It also refuses an SDK
-whose `MDK_MAJOR`/`MDK_MINOR` is below the API this fork compiles against, or
-whose iOS and macOS slices disagree. The installed framework is re-verified
-and its stamp re-read from the copy on disk before `mdk-version.json` records
-the provenance. SDKs only ship in stable `vX.Y.Z` releases and the SourceForge
-nightly, so an upstream release older than the margin is a hard stop: point
-`MDK_APPLE_SDK_URL` at a newer `mdk.xcframework`, or supply an `MDK_KEY` and
-skip the freshness requirement deliberately.
+Run these commands before Flutter/SwiftPM resolves native dependencies; the
+manifest does not download a missing local target. The example's GitHub Actions
+iOS and macOS jobs perform this preparation before their builds.
+
+By default, `refresh` resolves the newest stable
+[wang-bin/mdk-sdk](https://github.com/wang-bin/mdk-sdk) release and requires the
+asset's GitHub-published SHA-256. For an explicit HTTPS archive, provide both
+`MDK_APPLE_SDK_URL` and `MDK_APPLE_SDK_SHA256` (64 hex characters from a trusted
+source). A URL alone selects `url` mode, or select it with `--source url` /
+`MDK_APPLE_SDK_SOURCE=url`. Credentials and query strings are refused in URLs
+because the URL is recorded in provenance. Conflicting source/URL options fail.
+SourceForge automatic resolution is disabled: computing a hash of downloaded
+bytes is not expected-digest verification. A nightly can only be installed using
+explicit URL mode with a separately verified SHA-256.
+
+Every mode verifies the expected archive digest before extraction. The tool
+checks the build stamps of the iOS, simulator and macOS slices and refuses an SDK
+outside the 44-day window minus `MDK_FRESHNESS_MARGIN_DAYS` (default 7, allowed
+0–43). Each slice must meet the API floor and their versions must agree.
+`mdk-version.json` records provenance and installed file hashes; `check`
+re-verifies those files and freshness without downloading. Missing provenance,
+modified checked files, stale binaries and missing slices fail the build.
+
+This policy only keeps new builds inside the key-free window. The SDK embedded
+in an installed app continues to age and may expire 44 days after its own build;
+an affected installation still needs an app update or a separately authorized
+keyed build. The tool does not install a key, bypass the window or guarantee
+indefinite playback. A stale upstream release is a hard stop, requiring a fresh,
+verified archive rather than an unverified fallback.
 
 
 # Design

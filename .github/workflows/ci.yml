@@ -22,6 +22,24 @@ env:
   EXAMPLE: packages/f_videoplayer/example
 
 jobs:
+  sdk-tests:
+    name: MDK tool tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Test MDK resolution, integrity and freshness without network
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest discover -s third_party/fvp/darwin/fvp/tool/tests -p '*_test.py' -v
+
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -109,9 +127,23 @@ jobs:
           cache: true
       - name: Enable Swift Package Manager
         run: flutter config --enable-swift-package-manager
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prepare verified Apple MDK before SwiftPM resolution
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py --destination third_party/fvp/darwin/fvp/mdk.xcframework refresh
+          python3 third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py --destination third_party/fvp/darwin/fvp/mdk.xcframework check
       - name: Build iOS simulator example
         working-directory: ${{ env.EXAMPLE }}
         run: flutter build ios --simulator --debug
+      - name: Recheck SDK and build unsigned iOS release example
+        run: |
+          python3 third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py --destination third_party/fvp/darwin/fvp/mdk.xcframework check
+          cd "$EXAMPLE"
+          flutter build ios --release --no-codesign
 
   desktop:
     strategy:
@@ -123,7 +155,7 @@ jobs:
             command: flutter build linux --debug
           - name: macOS
             os: macos-latest
-            command: flutter build macos --debug
+            command: flutter build macos --release
           - name: Windows
             os: windows-latest
             command: flutter build windows --debug
@@ -146,6 +178,17 @@ jobs:
       - name: Enable Swift Package Manager
         if: runner.os == 'macOS'
         run: flutter config --enable-swift-package-manager
+      - uses: actions/setup-python@v6
+        if: runner.os == 'macOS'
+        with:
+          python-version: '3.12'
+      - name: Prepare verified Apple MDK before SwiftPM resolution
+        if: runner.os == 'macOS'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py --destination third_party/fvp/darwin/fvp/mdk.xcframework refresh
+          python3 third_party/fvp/darwin/fvp/tool/mdk_apple_freshness.py --destination third_party/fvp/darwin/fvp/mdk.xcframework check
       - name: Build desktop example
         working-directory: ${{ env.EXAMPLE }}
         run: ${{ matrix.command }}
